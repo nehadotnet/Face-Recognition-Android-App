@@ -187,8 +187,12 @@ public class RegisterActivity extends AppCompatActivity {
                                         // Task completed successfully
                                         // ...
                                         Log.d("tryFace", "Len = " + faces.size());
-                                        for (Face face : faces) {
-                                            Rect bounds = face.getBoundingBox();
+                                        if (faces.isEmpty()) return;
+
+                                        Face bestFace = getBestFace(faces, input);
+
+                                        if (bestFace != null) {
+                                            Rect bounds = bestFace.getBoundingBox();
                                             Paint paint = new Paint();
                                             paint.setColor(Color.RED);
                                             paint.setStyle(Paint.Style.STROKE);
@@ -207,6 +211,65 @@ public class RegisterActivity extends AppCompatActivity {
                                         // ...
                                     }
                                 });
+    }
+
+    private Face getBestFace(List<Face> faces, Bitmap input) {
+        Face bestFace = null;
+        double maxScore = Double.NEGATIVE_INFINITY;
+        for (Face face : faces) {
+            Rect bounds = face.getBoundingBox();
+            Bitmap faceBitmap = Bitmap.createBitmap(input, bounds.left, bounds.top, bounds.width(), bounds.height());
+
+            // Calculate score based on size
+            double sizeScore = bounds.width() * bounds.height();
+
+            // Calculate sharpness score
+            double sharpnessScore = calculateSharpness(faceBitmap);
+
+            // Combine scores (You can adjust the weights as necessary)
+            double score = sizeScore + sharpnessScore;
+
+            if (score > maxScore) {
+                maxScore = score;
+                bestFace = face;
+            }
+        }
+        return bestFace;
+
+    }
+
+    private double calculateSharpness(Bitmap bitmap) {
+        Bitmap grayBitmap = Bitmap.createBitmap(bitmap.getWidth(), bitmap.getHeight(), Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(grayBitmap);
+        Paint paint = new Paint();
+        paint.setColorFilter(new android.graphics.ColorMatrixColorFilter(new android.graphics.ColorMatrix(new float[]{
+                0.33f, 0.33f, 0.33f, 0, 0,
+                0.33f, 0.33f, 0.33f, 0, 0,
+                0.33f, 0.33f, 0.33f, 0, 0,
+                0, 0, 0, 1, 0
+        })));
+        canvas.drawBitmap(bitmap, 0, 0, paint);
+
+        Bitmap edgeBitmap = Bitmap.createBitmap(grayBitmap.getWidth(), grayBitmap.getHeight(), grayBitmap.getConfig());
+        android.renderscript.RenderScript rs = android.renderscript.RenderScript.create(this);
+        android.renderscript.Allocation allocationIn = android.renderscript.Allocation.createFromBitmap(rs, grayBitmap);
+        android.renderscript.Allocation allocationOut = android.renderscript.Allocation.createFromBitmap(rs, edgeBitmap);
+
+        android.renderscript.ScriptIntrinsicConvolve3x3 conv = android.renderscript.ScriptIntrinsicConvolve3x3.create(rs, android.renderscript.Element.U8_4(rs));
+        conv.setInput(allocationIn);
+        conv.forEach(allocationOut);
+        allocationOut.copyTo(edgeBitmap);
+
+        int[] pixels = new int[edgeBitmap.getHeight() * edgeBitmap.getWidth()];
+        edgeBitmap.getPixels(pixels, 0, edgeBitmap.getWidth(), 0, 0, edgeBitmap.getWidth(), edgeBitmap.getHeight());
+
+        double sum = 0;
+        for (int pixel : pixels) {
+            int r = (pixel >> 16) & 0xFF;
+            sum += r;
+        }
+
+        return sum / (edgeBitmap.getWidth() * edgeBitmap.getHeight());
     }
 
     FaceDetectorOptions highAccuracyOpts =
